@@ -261,13 +261,19 @@
 
         function renderDrawResults() {
             const container = document.getElementById('drawResults');
+            
+            // Sorteia quem recebe a bola e os lados do campo para os times em quadra
+            const teamWithBall = Math.random() > 0.5 ? 0 : 1;
+            const sideTeam0 = Math.random() > 0.5 ? "Esquerdo" : "Direito";
+            const sideTeam1 = sideTeam0 === "Esquerdo" ? "Direito" : "Esquerdo";
+
             container.innerHTML = currentTeams.map((t, idx) => `
                 <div class="bg-slate-800/60 p-4 rounded-2xl border-l-4 border-amber-500">
                     <h4 class="font-bold text-amber-400 mb-2 uppercase">${t.name}</h4>
                     <ul class="space-y-1 text-sm text-slate-300">
                         ${t.members.map(m => `<li>${m.name} (${'⭐'.repeat(m.stars)})</li>`).join('')}
                     </ul>
-                    ${idx < 2 ? `<div class="mt-2 text-[10px] text-green-400 font-bold uppercase">Em quadra</div>` : ''}
+                    ${idx < 2 ? `<div class="mt-2 text-[10px] text-green-400 font-bold uppercase">Em quadra - ${idx === teamWithBall ? '🏐 BOLA | ' : ''}🏗️ CAMPO: ${idx === 0 ? sideTeam0 : sideTeam1}</div>` : ''}
                 </div>
             `).join('');
         }
