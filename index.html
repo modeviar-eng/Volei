@@ -24,9 +24,7 @@
 
         <nav class="flex flex-wrap justify-center gap-4 mb-8 border-b border-slate-700 pb-2">
             <button onclick="showTab('cadastro')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-cadastro">Cadastro</button>
-            <button onclick="showTab('aleatorio')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-aleatorio">Modo Aleatório</button>
             <button onclick="showTab('times')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-times">Modo Times</button>
-            <button onclick="showTab('estrelas')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-estrelas">Modo Estrelas</button>
         </nav>
 
         <main class="glass rounded-3xl p-6 shadow-2xl">
@@ -39,7 +37,7 @@
                         <option value="2">⭐⭐ Intermediário</option>
                         <option value="3">⭐⭐⭐ Avançado</option>
                     </select>
-                    <button onclick="addPlayer()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 rounded-lg transition">Adicionar e Salvar</button>
+                    <button id="addPlayerBtn" onclick="addPlayer()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 rounded-lg transition">Adicionar e Salvar</button>
                 </div>
                 <div class="bg-slate-800/50 rounded-xl p-4">
                     <h3 class="font-bold mb-2 text-white">Lista no Banco (<span id="count">0</span>)</h3>
@@ -127,6 +125,7 @@
         let teamAIndex = 0;
         let teamBIndex = 1;
         let nextTeamQueue = 2;
+        let editingPlayerId = null;
 
         // Escuta o Banco de Dados
         onValue(playersRef, (snapshot) => {
@@ -144,11 +143,32 @@
             const name = document.getElementById('playerName').value;
             const stars = parseInt(document.getElementById('playerStars').value);
             if (!name) return;
-            push(playersRef, { name, stars });
+            
+            if (editingPlayerId) {
+                set(ref(db, `players/${editingPlayerId}`), { name, stars });
+                editingPlayerId = null;
+                document.getElementById('addPlayerBtn').innerText = 'Adicionar e Salvar';
+            } else {
+                push(playersRef, { name, stars });
+            }
             document.getElementById('playerName').value = '';
         };
 
+        window.startEditPlayer = (id) => {
+            const player = players.find(p => p.id === id);
+            if (!player) return;
+            document.getElementById('playerName').value = player.name;
+            document.getElementById('playerStars').value = player.stars;
+            editingPlayerId = id;
+            document.getElementById('addPlayerBtn').innerText = 'Salvar Alterações';
+        };
+
         window.removePlayer = (id) => {
+            if (editingPlayerId === id) {
+                editingPlayerId = null;
+                document.getElementById('addPlayerBtn').innerText = 'Adicionar e Salvar';
+                document.getElementById('playerName').value = '';
+            }
             remove(ref(db, `players/${id}`));
         };
 
@@ -158,7 +178,10 @@
             list.innerHTML = players.map(p => `
                 <li class="bg-slate-700 p-2 rounded flex justify-between items-center text-sm">
                     <span>${'⭐'.repeat(p.stars)} ${p.name}</span>
-                    <button onclick="removePlayer('${p.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-times"></i></button>
+                    <div class="flex items-center gap-2">
+                        <button onclick="startEditPlayer('${p.id}')" class="text-amber-400 hover:text-amber-300 transition"><i class="fas fa-edit"></i></button>
+                        <button onclick="removePlayer('${p.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-times"></i></button>
+                    </div>
                 </li>
             `).join('');
         }
@@ -205,20 +228,35 @@
             let pool = [...players].sort(() => Math.random() - 0.5);
             currentTeams = [];
             
-            if (currentMode === 'estrelas' || (currentMode === 'times' && document.getElementById('balanceOpt')?.value === 'equilibrado')) {
+            if (currentMode === 'times' && document.getElementById('balanceOpt')?.value === 'equilibrado') {
                 pool.sort((a, b) => b.stars - a.stars);
             }
 
             const numTeams = Math.floor(pool.length / pPerTeam);
             for (let i = 0; i < numTeams; i++) currentTeams.push({ name: `Time ${i + 1}`, members: [] });
 
-            pool.forEach((player, index) => {
-                const teamIndex = index % numTeams;
-                if (currentTeams[teamIndex].members.length < pPerTeam) currentTeams[teamIndex].members.push(player);
+            if (pool.length % pPerTeam > 0) {
+                currentTeams.push({ name: `Time Sobressalente`, members: [] });
+            }
+
+            let teamIndex = 0;
+            pool.forEach((player) => {
+                while (true) {
+                    const team = currentTeams[teamIndex];
+                    const maxCap = team.name === 'Time Sobressalente' ? (pool.length % pPerTeam) : pPerTeam;
+                    if (team.members.length < maxCap) {
+                        team.members.push(player);
+                        teamIndex = (teamIndex + 1) % currentTeams.length;
+                        break;
+                    } else {
+                        teamIndex = (teamIndex + 1) % currentTeams.length;
+                    }
+                }
             });
 
             teamAIndex = 0; teamBIndex = 1; nextTeamQueue = 2;
             renderDrawResults();
+            updateMatchDisplay();
         };
 
         function renderDrawResults() {
