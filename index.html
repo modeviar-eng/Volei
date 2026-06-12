@@ -19,7 +19,7 @@
             <h1 class="text-4xl font-black text-amber-400 italic tracking-tighter uppercase">
                 <i class="fas fa-volleyball-ball mr-2"></i>VolleyMaster
             </h1>
-            <p class="text-slate-400">Database Realtime Ativo</p>
+            <p class="text-slate-400">Database Realtime Ativo - <span id="currentDate" class="text-amber-400 font-bold"></span></p>
         </header>
 
         <nav class="flex flex-wrap justify-center gap-4 mb-8 border-b border-slate-700 pb-2">
@@ -121,7 +121,11 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const playersRef = collection(db, 'players');
-        const gameRef = doc(db, 'game', 'state');
+        
+        // Identificador único baseado no dia atual local
+        const todayStr = new Date().toISOString().split('T')[0];
+        const gameRef = doc(db, 'game', todayStr);
+        const presenceRef = doc(db, 'presence', todayStr);
 
         let players = [];
         let currentTeams = [];
@@ -133,6 +137,7 @@
         let editingPlayerId = null;
         let presence = {};
         let shouldRedrawAfterMatch = false;
+        let lastTeams = [];
 
         function saveGameState() {
             setDoc(gameRef, {
@@ -142,7 +147,8 @@
                 teamAIndex,
                 teamBIndex,
                 nextTeamQueue,
-                shouldRedrawAfterMatch
+                shouldRedrawAfterMatch,
+                lastTeams
             }, { merge: true });
         }
 
@@ -156,6 +162,7 @@
                 teamBIndex = data.teamBIndex ?? 1;
                 nextTeamQueue = data.nextTeamQueue ?? 2;
                 shouldRedrawAfterMatch = data.shouldRedrawAfterMatch || false;
+                lastTeams = data.lastTeams || [];
                 
                 if (currentTeams.length > 0) {
                     renderDrawResults();
@@ -164,14 +171,23 @@
             }
         });
 
-        // Escuta o Banco de Dados
+        // Escuta a presença diária de forma isolada
+        onSnapshot(presenceRef, (snapshot) => {
+            if (snapshot.exists()) {
+                presence = snapshot.data() || {};
+            } else {
+                presence = {};
+            }
+            renderPlayers();
+        });
+
+        // Escuta o Banco de Dados de jogadores globais
         onSnapshot(playersRef, (snapshot) => {
             players = [];
             snapshot.forEach((doc) => {
                 const id = doc.id;
                 const data = doc.data();
                 players.push({ id, ...data });
-                presence[id] = data.presence || false;
             });
             renderPlayers();
         });
@@ -182,12 +198,11 @@
             if (!name) return;
             
             if (editingPlayerId) {
-                const player = players.find(p => p.id === editingPlayerId);
-                setDoc(doc(db, 'players', editingPlayerId), { name, stars, presence: player?.presence || false });
+                setDoc(doc(db, 'players', editingPlayerId), { name, stars });
                 editingPlayerId = null;
                 document.getElementById('addPlayerBtn').innerText = 'Adicionar e Salvar';
             } else {
-                addDoc(playersRef, { name, stars, presence: false });
+                addDoc(playersRef, { name, stars });
             }
             document.getElementById('playerName').value = '';
         };
@@ -217,7 +232,7 @@
             const newPresence = !presence[id];
             presence[id] = newPresence;
             
-            setDoc(doc(db, 'players', id), { name: player.name, stars: player.stars, presence: newPresence });
+            setDoc(presenceRef, presence);
             
             if (currentTeams && currentTeams.length > 0) {
                 if (newPresence) {
@@ -308,34 +323,78 @@
             
             if (presentPlayers.length < pPerTeam * 2) { alert("Mínimo 2 times com jogadores presentes!"); return; }
 
-            let pool = [...presentPlayers].sort(() => Math.random() - 0.5);
-            currentTeams = [];
-            
-            if ((currentMode === 'times' || currentMode === 'continuo') && document.getElementById('balanceOpt')?.value === 'equilibrado') {
-                pool.sort((a, b) => b.stars - a.stars);
-            }
-
-            const numTeams = Math.floor(pool.length / pPerTeam);
-            for (let i = 0; i < numTeams; i++) currentTeams.push({ name: `Time ${i + 1}`, members: [] });
-
-            if (pool.length % pPerTeam > 0) {
-                currentTeams.push({ name: `Time Sobressalente`, members: [] });
-            }
-
-            let teamIndex = 0;
-            pool.forEach((player) => {
-                while (true) {
-                    const team = currentTeams[teamIndex];
-                    const maxCap = team.name === 'Time Sobressalente' ? (pool.length % pPerTeam) : pPerTeam;
-                    if (team.members.length < maxCap) {
-                        team.members.push(player);
-                        teamIndex = (teamIndex + 1) % currentTeams.length;
-                        break;
-                    } else {
-                        teamIndex = (teamIndex + 1) % currentTeams.length;
+            // Mapeia os pares do sorteio anterior para calcular penalidade de repetição
+            const lastPairs = new Set();
+            if (lastTeams && lastTeams.length > 0) {
+                lastTeams.forEach(t => {
+                    for (let i = 0; i < t.members.length; i++) {
+                        for (let j = i + 1; j < t.members.length; j++) {
+                            const p1 = t.members[i].id;
+                            const p2 = t.members[j].id;
+                            lastPairs.add(p1 < p2 ? `${p1}_${p2}` : `${p2}_${p1}`);
+                        }
                     }
+                });
+            }
+
+            let bestTeams = [];
+            let minPenalty = Infinity;
+
+            // Executa várias simulações aleatórias buscando o melhor rodízio
+            for (let iteration = 0; iteration < 100; iteration++) {
+                let pool = [...presentPlayers].sort(() => Math.random() - 0.5);
+                
+                if ((currentMode === 'times' || currentMode === 'continuo') && document.getElementById('balanceOpt')?.value === 'equilibrado') {
+                    pool.sort((a, b) => b.stars - a.stars);
                 }
-            });
+
+                const numTeams = Math.floor(pool.length / pPerTeam);
+                let candidateTeams = [];
+                for (let i = 0; i < numTeams; i++) candidateTeams.push({ name: `Time ${i + 1}`, members: [] });
+
+                if (pool.length % pPerTeam > 0) {
+                    candidateTeams.push({ name: `Time Sobressalente`, members: [] });
+                }
+
+                let teamIndex = 0;
+                pool.forEach((player) => {
+                    while (true) {
+                        const team = candidateTeams[teamIndex];
+                        const maxCap = team.name === 'Time Sobressalente' ? (pool.length % pPerTeam) : pPerTeam;
+                        if (team.members.length < maxCap) {
+                            team.members.push(player);
+                            teamIndex = (teamIndex + 1) % candidateTeams.length;
+                            break;
+                        } else {
+                            teamIndex = (teamIndex + 1) % candidateTeams.length;
+                        }
+                    }
+                });
+
+                // Calcula a pontuação de penalidade de repetição deste arranjo
+                let penalty = 0;
+                candidateTeams.forEach(t => {
+                    for (let i = 0; i < t.members.length; i++) {
+                        for (let j = i + 1; j < t.members.length; j++) {
+                            const p1 = t.members[i].id;
+                            const p2 = t.members[j].id;
+                            const pairKey = p1 < p2 ? `${p1}_${p2}` : `${p2}_${p1}`;
+                            if (lastPairs.has(pairKey)) {
+                                penalty++;
+                            }
+                        }
+                    }
+                });
+
+                if (penalty < minPenalty) {
+                    minPenalty = penalty;
+                    bestTeams = candidateTeams;
+                    if (penalty === 0) break; 
+                }
+            }
+
+            currentTeams = bestTeams;
+            lastTeams = JSON.parse(JSON.stringify(currentTeams)); // Clona profundamente para a próxima rodada
 
             teamAIndex = 0; teamBIndex = 1; nextTeamQueue = 2;
             score = { A: 0, B: 0 };
@@ -347,7 +406,6 @@
         function renderDrawResults() {
             const container = document.getElementById('drawResults');
             
-            // Sorteia quem recebe a bola e os lados do campo para os times em quadra
             const teamWithBall = Math.random() > 0.5 ? 0 : 1;
             const sideTeam0 = Math.random() > 0.5 ? "Esquerdo" : "Direito";
             const sideTeam1 = sideTeam0 === "Esquerdo" ? "Direito" : "Esquerdo";
@@ -423,6 +481,8 @@
         window.sortField = () => { alert("🏗️ Time A no lado " + (Math.random() > 0.5 ? "Esquerdo" : "Direito")); };
 
         // Inicialização
+        const formattedDate = new Date().toLocaleDateString('pt-BR');
+        document.getElementById('currentDate').innerText = formattedDate;
         showTab('cadastro');
     </script>
 </body>
