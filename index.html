@@ -126,12 +126,17 @@
         let teamBIndex = 1;
         let nextTeamQueue = 2;
         let editingPlayerId = null;
+        let presence = {};
 
         // Escuta o Banco de Dados
         onSnapshot(playersRef, (snapshot) => {
             players = [];
             snapshot.forEach((doc) => {
-                players.push({ id: doc.id, ...doc.data() });
+                const id = doc.id;
+                players.push({ id, ...doc.data() });
+                if (presence[id] === undefined) {
+                    presence[id] = false;
+                }
             });
             renderPlayers();
         });
@@ -169,12 +174,22 @@
             deleteDoc(doc(db, 'players', id));
         };
 
+        window.togglePresence = (id) => {
+            presence[id] = !presence[id];
+            renderPlayers();
+        };
+
         function renderPlayers() {
             const list = document.getElementById('playerList');
             document.getElementById('count').innerText = players.length;
             list.innerHTML = players.map(p => `
-                <li class="bg-slate-700 p-2 rounded flex justify-between items-center text-sm">
-                    <span>${'⭐'.repeat(p.stars)} ${p.name}</span>
+                <li class="bg-slate-700 p-2 rounded flex justify-between items-center text-sm ${presence[p.id] ? 'border-l-4 border-green-500' : 'opacity-50'}">
+                    <div class="flex items-center gap-2">
+                        <button onclick="togglePresence('${p.id}')" class="transition ${presence[p.id] ? 'text-green-400' : 'text-slate-400 hover:text-white'}">
+                            <i class="${presence[p.id] ? 'fas fa-check-circle' : 'far fa-circle'}"></i>
+                        </button>
+                        <span>${'⭐'.repeat(p.stars)} ${p.name}</span>
+                    </div>
                     <div class="flex items-center gap-2">
                         <button onclick="startEditPlayer('${p.id}')" class="text-amber-400 hover:text-amber-300 transition"><i class="fas fa-edit"></i></button>
                         <button onclick="removePlayer('${p.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-times"></i></button>
@@ -220,9 +235,11 @@
 
         window.drawTeams = () => {
             const pPerTeam = parseInt(document.getElementById('playersPerTeam').value);
-            if (players.length < pPerTeam * 2) { alert("Mínimo 2 times!"); return; }
+            const presentPlayers = players.filter(p => presence[p.id]);
+            
+            if (presentPlayers.length < pPerTeam * 2) { alert("Mínimo 2 times com jogadores presentes!"); return; }
 
-            let pool = [...players].sort(() => Math.random() - 0.5);
+            let pool = [...presentPlayers].sort(() => Math.random() - 0.5);
             currentTeams = [];
             
             if (currentMode === 'times' && document.getElementById('balanceOpt')?.value === 'equilibrado') {
