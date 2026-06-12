@@ -207,6 +207,7 @@
             renderPlayers();
         };
 
+        window.renderPlayers = renderPlayers;
         function renderPlayers() {
             const list = document.getElementById('playerList');
             document.getElementById('count').innerText = players.length;
