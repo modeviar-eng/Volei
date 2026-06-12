@@ -121,6 +121,7 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const playersRef = collection(db, 'players');
+        const gameRef = doc(db, 'game', 'state');
 
         let players = [];
         let currentTeams = [];
@@ -133,15 +134,44 @@
         let presence = {};
         let shouldRedrawAfterMatch = false;
 
+        function saveGameState() {
+            setDoc(gameRef, {
+                currentTeams,
+                score,
+                currentMode,
+                teamAIndex,
+                teamBIndex,
+                nextTeamQueue,
+                shouldRedrawAfterMatch
+            }, { merge: true });
+        }
+
+        onSnapshot(gameRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                currentTeams = data.currentTeams || [];
+                score = data.score || { A: 0, B: 0 };
+                currentMode = data.currentMode || '';
+                teamAIndex = data.teamAIndex ?? 0;
+                teamBIndex = data.teamBIndex ?? 1;
+                nextTeamQueue = data.nextTeamQueue ?? 2;
+                shouldRedrawAfterMatch = data.shouldRedrawAfterMatch || false;
+                
+                if (currentTeams.length > 0) {
+                    renderDrawResults();
+                    updateMatchDisplay();
+                }
+            }
+        });
+
         // Escuta o Banco de Dados
         onSnapshot(playersRef, (snapshot) => {
             players = [];
             snapshot.forEach((doc) => {
                 const id = doc.id;
-                players.push({ id, ...doc.data() });
-                if (presence[id] === undefined) {
-                    presence[id] = false;
-                }
+                const data = doc.data();
+                players.push({ id, ...data });
+                presence[id] = data.presence || false;
             });
             renderPlayers();
         });
@@ -152,11 +182,12 @@
             if (!name) return;
             
             if (editingPlayerId) {
-                setDoc(doc(db, 'players', editingPlayerId), { name, stars });
+                const player = players.find(p => p.id === editingPlayerId);
+                setDoc(doc(db, 'players', editingPlayerId), { name, stars, presence: player?.presence || false });
                 editingPlayerId = null;
                 document.getElementById('addPlayerBtn').innerText = 'Adicionar e Salvar';
             } else {
-                addDoc(playersRef, { name, stars });
+                addDoc(playersRef, { name, stars, presence: false });
             }
             document.getElementById('playerName').value = '';
         };
@@ -180,22 +211,25 @@
         };
 
         window.togglePresence = (id) => {
-            presence[id] = !presence[id];
+            const player = players.find(p => p.id === id);
+            if (!player) return;
+            
+            const newPresence = !presence[id];
+            presence[id] = newPresence;
+            
+            setDoc(doc(db, 'players', id), { name: player.name, stars: player.stars, presence: newPresence });
             
             if (currentTeams && currentTeams.length > 0) {
-                if (presence[id]) {
-                    const player = players.find(p => p.id === id);
-                    if (player) {
-                        const alreadyInTeam = currentTeams.some(t => t.members.some(m => m.id === id));
-                        if (!alreadyInTeam) {
-                            let sobressalente = currentTeams.find(t => t.name === 'Time Sobressalente');
-                            if (sobressalente) {
-                                sobressalente.members.push(player);
-                            } else {
-                                currentTeams.push({ name: 'Time Sobressalente', members: [player] });
-                            }
-                            renderDrawResults();
+                if (newPresence) {
+                    const alreadyInTeam = currentTeams.some(t => t.members.some(m => m.id === id));
+                    if (!alreadyInTeam) {
+                        let sobressalente = currentTeams.find(t => t.name === 'Time Sobressalente');
+                        if (sobressalente) {
+                            sobressalente.members.push(player);
+                        } else {
+                            currentTeams.push({ name: 'Time Sobressalente', members: [player] });
                         }
+                        renderDrawResults();
                     }
                 } else {
                     currentTeams.forEach(t => {
@@ -204,6 +238,7 @@
                     renderDrawResults();
                 }
             }
+            saveGameState();
             renderPlayers();
         };
 
@@ -242,6 +277,7 @@
                 document.getElementById('btn-' + tab).classList.add('tab-active');
                 renderModeOptions();
                 showSubTab('sorteio');
+                saveGameState();
             }
         };
 
@@ -302,8 +338,10 @@
             });
 
             teamAIndex = 0; teamBIndex = 1; nextTeamQueue = 2;
+            score = { A: 0, B: 0 };
             renderDrawResults();
             updateMatchDisplay();
+            saveGameState();
         };
 
         function renderDrawResults() {
@@ -328,18 +366,19 @@
         window.updateMatchDisplay = () => {
             const tA = currentTeams[teamAIndex];
             const tB = currentTeams[teamBIndex];
+            if (!tA || !tB) return;
             document.getElementById('scoreNameA').innerText = tA.name;
             document.getElementById('scoreNameB').innerText = tB.name;
             document.getElementById('playersOnCourtA').innerHTML = tA.members.map(m => `<div>${m.name}</div>`).join('');
             document.getElementById('playersOnCourtB').innerHTML = tB.members.map(m => `<div>${m.name}</div>`).join('');
-            score = { A: 0, B: 0 };
-            document.getElementById('scoreA').innerText = 0;
-            document.getElementById('scoreB').innerText = 0;
+            document.getElementById('scoreA').innerText = score.A;
+            document.getElementById('scoreB').innerText = score.B;
         };
 
         window.changeScore = (team, val) => {
             score[team] = Math.max(0, score[team] + val);
             document.getElementById('score' + team).innerText = score[team];
+            saveGameState();
         };
 
         window.declareWinner = (winner) => {
@@ -355,6 +394,8 @@
                 document.getElementById('scoreB').innerText = 0;
                 if (currentMode === 'continuo') {
                     window.drawTeams();
+                } else {
+                    saveGameState();
                 }
                 return;
             }
@@ -373,7 +414,9 @@
                     if (currentMode === 'continuo') shouldRedrawAfterMatch = true;
                 }
             }
+            score = { A: 0, B: 0 };
             updateMatchDisplay();
+            saveGameState();
         };
 
         window.toggleBall = () => { alert("🏐 Bola com o " + (Math.random() > 0.5 ? "Time A" : "Time B")); };
