@@ -41,7 +41,10 @@
                     <button id="addPlayerBtn" onclick="addPlayer()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 rounded-lg transition">Adicionar e Salvar</button>
                 </div>
                 <div class="bg-slate-800/50 rounded-xl p-4">
-                    <h3 class="font-bold mb-2 text-white">Lista no Banco (<span id="count">0</span>)</h3>
+                    <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-4">
+                        <h3 class="font-bold text-white">Lista no Banco (<span id="count">0</span>)</h3>
+                        <input type="text" id="searchPlayer" oninput="renderPlayers()" placeholder="Pesquisar jogador..." class="bg-slate-700 px-3 py-1.5 rounded-lg text-sm outline-none border border-slate-600 focus:border-amber-400 text-white w-full sm:w-48">
+                    </div>
                     <ul id="playerList" class="grid grid-cols-2 md:grid-cols-4 gap-2"></ul>
                 </div>
             </section>
@@ -178,13 +181,39 @@
 
         window.togglePresence = (id) => {
             presence[id] = !presence[id];
+            
+            if (currentTeams && currentTeams.length > 0) {
+                if (presence[id]) {
+                    const player = players.find(p => p.id === id);
+                    if (player) {
+                        const alreadyInTeam = currentTeams.some(t => t.members.some(m => m.id === id));
+                        if (!alreadyInTeam) {
+                            let sobressalente = currentTeams.find(t => t.name === 'Time Sobressalente');
+                            if (sobressalente) {
+                                sobressalente.members.push(player);
+                            } else {
+                                currentTeams.push({ name: 'Time Sobressalente', members: [player] });
+                            }
+                            renderDrawResults();
+                        }
+                    }
+                } else {
+                    currentTeams.forEach(t => {
+                        t.members = t.members.filter(m => m.id !== id);
+                    });
+                    renderDrawResults();
+                }
+            }
             renderPlayers();
         };
 
         function renderPlayers() {
             const list = document.getElementById('playerList');
             document.getElementById('count').innerText = players.length;
-            list.innerHTML = players.map(p => `
+            const searchVal = document.getElementById('searchPlayer') ? document.getElementById('searchPlayer').value.toLowerCase() : '';
+            const filteredPlayers = players.filter(p => p.name.toLowerCase().includes(searchVal));
+            
+            list.innerHTML = filteredPlayers.map(p => `
                 <li class="bg-slate-700 p-2 rounded flex justify-between items-center text-sm ${presence[p.id] ? 'border-l-4 border-green-500' : 'opacity-50'}">
                     <div class="flex items-center gap-2">
                         <button onclick="togglePresence('${p.id}')" class="transition ${presence[p.id] ? 'text-green-400' : 'text-slate-400 hover:text-white'}">
