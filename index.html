@@ -323,7 +323,7 @@
             
             if (presentPlayers.length < pPerTeam * 2) { alert("Mínimo 2 times com jogadores presentes!"); return; }
 
-            // Mapeia os pares do sorteio anterior para calcular penalidade de repetição
+            // Mapeia os pares do sorteio anterior para calcular penalidade de repetição de duplas
             const lastPairs = new Set();
             if (lastTeams && lastTeams.length > 0) {
                 lastTeams.forEach(t => {
@@ -337,12 +337,28 @@
                 });
             }
 
+            // Mapeia em qual time nominal cada jogador estava para evitar repetir o mesmo time
+            const previousTeamMap = new Map();
+            if (lastTeams && lastTeams.length > 0) {
+                lastTeams.forEach(t => {
+                    t.members.forEach(m => {
+                        previousTeamMap.set(m.id, t.name);
+                    });
+                });
+            }
+
             let bestTeams = [];
             let minPenalty = Infinity;
 
             // Executa várias simulações aleatórias buscando o melhor rodízio
             for (let iteration = 0; iteration < 100; iteration++) {
-                let pool = [...presentPlayers].sort(() => Math.random() - 0.5);
+                let pool = [...presentPlayers];
+                
+                // Embaralhamento robusto (Fisher-Yates) para garantir aleatoriedade real em todos os nomes
+                for (let i = pool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [pool[i], pool[j]] = [pool[j], pool[i]];
+                }
                 
                 if ((currentMode === 'times' || currentMode === 'continuo') && document.getElementById('balanceOpt')?.value === 'equilibrado') {
                     pool.sort((a, b) => b.stars - a.stars);
@@ -356,7 +372,8 @@
                     candidateTeams.push({ name: `Time Sobressalente`, members: [] });
                 }
 
-                let teamIndex = 0;
+                // Randomiza por qual time a distribuição começa para evitar tendências fixas
+                let teamIndex = Math.floor(Math.random() * candidateTeams.length);
                 pool.forEach((player) => {
                     while (true) {
                         const team = candidateTeams[teamIndex];
@@ -371,9 +388,15 @@
                     }
                 });
 
-                // Calcula a pontuação de penalidade de repetição deste arranjo
+                // Calcula a pontuação de penalidade deste arranjo
                 let penalty = 0;
                 candidateTeams.forEach(t => {
+                    t.members.forEach(m => {
+                        // Se o jogador caiu exatamente no mesmo time anterior, aplica peso pesado de penalidade
+                        if (previousTeamMap.get(m.id) === t.name) {
+                            penalty += 15;
+                        }
+                    });
                     for (let i = 0; i < t.members.length; i++) {
                         for (let j = i + 1; j < t.members.length; j++) {
                             const p1 = t.members[i].id;
