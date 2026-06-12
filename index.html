@@ -25,6 +25,7 @@
         <nav class="flex flex-wrap justify-center gap-4 mb-8 border-b border-slate-700 pb-2">
             <button onclick="showTab('cadastro')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-cadastro">Cadastro</button>
             <button onclick="showTab('times')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-times">Modo Times</button>
+            <button onclick="showTab('continuo')" class="nav-link px-4 py-2 font-bold uppercase transition hover:text-amber-400" id="btn-continuo">Modo Contínuo</button>
         </nav>
 
         <main class="glass rounded-3xl p-6 shadow-2xl">
@@ -127,6 +128,7 @@
         let nextTeamQueue = 2;
         let editingPlayerId = null;
         let presence = {};
+        let shouldRedrawAfterMatch = false;
 
         // Escuta o Banco de Dados
         onSnapshot(playersRef, (snapshot) => {
@@ -225,7 +227,7 @@
 
         function renderModeOptions() {
             const extra = document.getElementById('extra-options');
-            extra.innerHTML = (currentMode === 'times') ? `
+            extra.innerHTML = (currentMode === 'times' || currentMode === 'continuo') ? `
                 <label class="block text-xs uppercase text-slate-400 mb-1">Equilíbrio</label>
                 <select id="balanceOpt" class="w-full bg-slate-700 p-2 rounded text-white">
                     <option value="aleatorio">Tudo Aleatório</option>
@@ -234,6 +236,7 @@
         }
 
         window.drawTeams = () => {
+            shouldRedrawAfterMatch = false;
             const pPerTeam = parseInt(document.getElementById('playersPerTeam').value);
             const presentPlayers = players.filter(p => presence[p.id]);
             
@@ -242,7 +245,7 @@
             let pool = [...presentPlayers].sort(() => Math.random() - 0.5);
             currentTeams = [];
             
-            if (currentMode === 'times' && document.getElementById('balanceOpt')?.value === 'equilibrado') {
+            if ((currentMode === 'times' || currentMode === 'continuo') && document.getElementById('balanceOpt')?.value === 'equilibrado') {
                 pool.sort((a, b) => b.stars - a.stars);
             }
 
@@ -310,21 +313,35 @@
         };
 
         window.declareWinner = (winner) => {
+            if (currentMode === 'continuo' && shouldRedrawAfterMatch) {
+                window.drawTeams();
+                return;
+            }
+
             if (currentTeams.length < 3) {
                 alert(`Vencedor: ${currentTeams[winner === 'A' ? teamAIndex : teamBIndex].name}!`);
                 score = { A: 0, B: 0 };
                 document.getElementById('scoreA').innerText = 0;
                 document.getElementById('scoreB').innerText = 0;
+                if (currentMode === 'continuo') {
+                    window.drawTeams();
+                }
                 return;
             }
             if (winner === 'A') teamBIndex = nextTeamQueue;
             else teamAIndex = nextTeamQueue;
 
             nextTeamQueue++;
-            if (nextTeamQueue >= currentTeams.length) nextTeamQueue = 0;
+            if (nextTeamQueue >= currentTeams.length) {
+                nextTeamQueue = 0;
+                if (currentMode === 'continuo') shouldRedrawAfterMatch = true;
+            }
             while (nextTeamQueue === teamAIndex || nextTeamQueue === teamBIndex) {
                 nextTeamQueue++;
-                if (nextTeamQueue >= currentTeams.length) nextTeamQueue = 0;
+                if (nextTeamQueue >= currentTeams.length) {
+                    nextTeamQueue = 0;
+                    if (currentMode === 'continuo') shouldRedrawAfterMatch = true;
+                }
             }
             updateMatchDisplay();
         };
